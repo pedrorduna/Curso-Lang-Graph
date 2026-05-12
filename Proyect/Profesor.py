@@ -7,7 +7,7 @@ from operator import add as add_messages
 from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_core.tools import tool
 
@@ -22,22 +22,30 @@ embeddings = OpenAIEmbeddings(
 )
 
 
-pdf_path = "Stock_Market_Performance_2024.pdf"
+def get_pdf_paths() -> list[str]:
+    user_input = input("\nIngresa rutas de PDF separadas por coma: ").strip()
+    paths = [p.strip().strip('"') for p in user_input.split(",") if p.strip()]
+    if not paths:
+        raise ValueError("No se proporcionaron rutas de PDF.")
+    return paths
 
 
-# Safety measure I have put for debugging purposes :)
-if not os.path.exists(pdf_path):
-    raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+pdf_paths = get_pdf_paths()
 
-pdf_loader = PyPDFLoader(pdf_path) # This loads the PDF
+for path in pdf_paths:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"PDF file not found: {path}")
 
-# Checks if the PDF is there
-try:
-    pages = pdf_loader.load()
-    print(f"PDF has been loaded and has {len(pages)} pages")
-except Exception as e:
-    print(f"Error loading PDF: {e}")
-    raise
+pages = []
+for path in pdf_paths:
+    pdf_loader = PyPDFLoader(path)
+    try:
+        loaded_pages = pdf_loader.load()
+        pages.extend(loaded_pages)
+        print(f"PDF cargado: {path} ({len(loaded_pages)} paginas)")
+    except Exception as e:
+        print(f"Error loading PDF {path}: {e}")
+        raise
 
 # Chunking Process
 text_splitter = RecursiveCharacterTextSplitter(
@@ -48,8 +56,8 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 pages_split = text_splitter.split_documents(pages) # We now apply this to our pages
 
-persist_directory = r"C:\Vaibhav\LangGraph_Book\LangGraphCourse\Agents"
-collection_name = "stock_market"
+persist_directory = os.path.join(os.getcwd(), "chroma_db")
+collection_name = "teacher_rag"
 
 # If our collection does not exist in the directory, we create using the os command
 if not os.path.exists(persist_directory):
@@ -80,13 +88,13 @@ retriever = vectorstore.as_retriever(
 @tool
 def retriever_tool(query: str) -> str:
     """
-    This tool searches and returns the information from the Stock Market Performance 2024 document.
+    This tool searches and returns relevant information from the loaded documents.
     """
 
     docs = retriever.invoke(query)
 
     if not docs:
-        return "I found no relevant information in the Stock Market Performance 2024 document."
+        return "I found no relevant information in the loaded documents."
     
     results = []
     for i, doc in enumerate(docs):
@@ -110,9 +118,10 @@ def should_continue(state: AgentState):
 
 
 system_prompt = """
-You are an intelligent AI assistant who answers questions about Stock Market Performance in 2024 based on the PDF document loaded into your knowledge base.
-Use the retriever tool available to answer questions about the stock market performance data. You can make multiple calls if needed.
-If you need to look up some information before asking a follow up question, you are allowed to do that!
+You are an intelligent AI assistant and a helpful teacher.
+Answer questions based on the documents loaded into your knowledge base.
+Use the retriever tool to look up information when needed, and you may make multiple calls.
+If the documents do not contain enough information, say so clearly.
 Please always cite the specific parts of the documents you use in your answers.
 """
 
